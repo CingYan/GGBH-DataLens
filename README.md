@@ -1,10 +1,10 @@
-# DataLens — 鬼谷八荒資料匯出工具
+# 鬼谷八荒 DataLens — 資料匯出工具 MOD
 
 <p align="center">
   <img src="preview.png" alt="DataLens Preview" width="500">
 </p>
 
-**DataLens** 是一款鬼谷八荒（Tale of Immortal）的資料匯出 MOD，能一鍵將遊戲內六大配置表匯出為 CSV 檔案，方便 MOD 開發者查表、除錯、分析資料。
+**鬼谷八荒 DataLens** 是一款[鬼谷八荒（Tale of Immortal）](https://store.steampowered.com/app/1468810/)的資料匯出 MOD，能一鍵將遊戲內六大配置表匯出為 CSV 檔案，方便 MOD 開發者查表、除錯、分析資料。
 
 ## ✨ 功能特色
 
@@ -63,11 +63,17 @@
 - MOD/BASE 自動標記
 - 本地化翻譯支援
 
+## 👥 貢獻者
+
+- [CingYan](https://github.com/CingYan) — 專案發起人
+- Eagle (拍拍) — AI 開發助手，負責程式碼撰寫、反射探測、CSV 匯出邏輯設計
+
 ## 📄 授權
 
 MIT License
 
 ## 🙏 致謝
 
-- 鬼谷八荒開發團隊
-- MelonLoader 社群
+- [鬼谷八荒](https://store.steampowered.com/app/1468810/)開發團隊
+- [MelonLoader](https://melonwiki.xyz/) 社群
+- [OpenClaw](https://github.com/openclaw/openclaw) — AI 基礎設施
