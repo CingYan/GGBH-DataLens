@@ -10,9 +10,10 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.1.0";
+        private const string VERSION = "datalens-v1.1.1";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
+        private const int MAX_SCAN_DEPTH = 3;
 
         private static void Log(string msg)
         {
@@ -76,6 +77,49 @@ namespace MOD_b4qnSo
             catch (Exception ex) { Log("[" + file + "] write error: " + ex.Message); }
         }
 
+        private static bool ContainsAny(string haystack, string[] needles)
+        {
+            if (string.IsNullOrEmpty(haystack)) return false;
+            string h = haystack.ToLowerInvariant();
+            for (int i = 0; i < needles.Length; i++)
+            {
+                string n = needles[i];
+                if (!string.IsNullOrEmpty(n) && h.Contains(n.ToLowerInvariant())) return true;
+            }
+            return false;
+        }
+
+        private static bool LooksLikePrimitive(object value)
+        {
+            if (value == null) return true;
+            Type t = value.GetType();
+            return t.IsPrimitive || t.IsEnum || value is string || value is decimal;
+        }
+
+        private static bool LooksLikeConfTable(object obj)
+        {
+            if (obj == null) return false;
+            try
+            {
+                if (GetMemberValue(obj, "allConfList") != null) return true;
+                if (GetListCount(obj) >= 0 && GetIndexedValue(obj, 0) != null) return true;
+            }
+            catch { }
+            return false;
+        }
+
+        private static bool IsSafeScanObject(object obj)
+        {
+            if (obj == null) return false;
+            if (LooksLikePrimitive(obj)) return false;
+            Type t = obj.GetType();
+            string n = t.FullName ?? t.Name;
+            if (n.StartsWith("System.")) return false;
+            if (n.Contains("UnityEngine")) return false;
+            if (n.Contains("MelonLoader")) return false;
+            return true;
+        }
+
         private static object GetMemberValue(object obj, string name)
         {
             if (obj == null || string.IsNullOrEmpty(name)) return null;
@@ -134,31 +178,119 @@ namespace MOD_b4qnSo
             try { return Convert.ToInt32(count); } catch { return -1; }
         }
 
-        private static bool ContainsAny(string haystack, string[] needles)
+        private static IEnumerable<object> EnumerateList(object list)
         {
-            if (string.IsNullOrEmpty(haystack)) return false;
-            string h = haystack.ToLowerInvariant();
-            for (int i = 0; i < needles.Length; i++)
+            int count = GetListCount(list);
+            if (count >= 0)
             {
-                string n = needles[i];
-                if (!string.IsNullOrEmpty(n) && h.Contains(n.ToLowerInvariant())) return true;
+                for (int i = 0; i < count && i < MAX_ROWS_PER_TABLE; i++)
+                {
+                    object item = GetIndexedValue(list, i);
+                    if (item != null) yield return item;
+                }
+                yield break;
             }
-            return false;
+
+            int fails = 0;
+            for (int i = 0; i < MAX_ROWS_PER_TABLE && fails < MAX_FAILS_AFTER_DATA; i++)
+            {
+                object item = GetIndexedValue(list, i);
+                if (item == null)
+                {
+                    fails++;
+                    continue;
+                }
+                fails = 0;
+                yield return item;
+            }
         }
 
-        private static bool LooksLikePrimitive(object value)
+        private static string TableKey(string path, object table)
         {
-            if (value == null) return true;
-            Type t = value.GetType();
-            return t.IsPrimitive || t.IsEnum || value is string || value is decimal;
+            string typeName = "";
+            try { typeName = table.GetType().FullName; } catch { }
+            return path + "|" + typeName;
+        }
+
+        private static void FindMatchingTables(object root, string path, string[] keywords, List<TableRef> result, HashSet<object> seen, HashSet<string> tableSeen, int depth)
+        {
+            if (root == null || depth > MAX_SCAN_DEPTH) return;
+            if (!IsSafeScanObject(root)) return;
+            if (seen.Contains(root)) return;
+            seen.Add(root);
+
+            if (LooksLikeConfTable(root))
+            {
+                bool nameHit = ContainsAny(path, keywords);
+                string typeName = "";
+                try { typeName = root.GetType().FullName; } catch { }
+                bool typeHit = ContainsAny(typeName, keywords);
+                if (nameHit || typeHit)
+                {
+                    string key = TableKey(path, root);
+                    if (!tableSeen.Contains(key))
+                    {
+                        tableSeen.Add(key);
+                        result.Add(new TableRef(path, root));
+                    }
+                }
+                return;
+            }
+
+            Type t = root.GetType();
+            BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+            FieldInfo[] fields = t.GetFields(flags);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo f = fields[i];
+                if (f.Name.Contains("k__BackingField")) continue;
+                object value = null;
+                try { value = f.GetValue(root); } catch { continue; }
+                FindMatchingTables(value, path + "." + f.Name, keywords, result, seen, tableSeen, depth + 1);
+            }
+
+            PropertyInfo[] props = t.GetProperties(flags);
+            for (int i = 0; i < props.Length; i++)
+            {
+                PropertyInfo p = props[i];
+                if (p.GetIndexParameters().Length > 0) continue;
+                object value = null;
+                try { value = p.GetValue(root, null); } catch { continue; }
+                FindMatchingTables(value, path + "." + p.Name, keywords, result, seen, tableSeen, depth + 1);
+            }
+        }
+
+        private static object GetTableList(object confTable)
+        {
+            object allConf = GetMemberValue(confTable, "allConfList");
+            if (allConf != null) return allConf;
+            allConf = GetMemberValue(confTable, "_allConfList");
+            if (allConf != null) return allConf;
+            allConf = GetMemberValue(confTable, "allConfDic");
+            if (allConf != null) return allConf;
+            allConf = GetMemberValue(confTable, "_allConfDic");
+            if (allConf != null) return allConf;
+            return confTable;
+        }
+
+        private static string GetBestItemId(object item)
+        {
+            foreach (string name in new[] { "id", "ID", "key", "Key", "className", "name", "npcId" })
+            {
+                object v = GetMemberValue(item, name);
+                if (v != null && !string.IsNullOrEmpty(ObjToString(v))) return ObjToString(v);
+            }
+            return "";
         }
 
         private static void AppendPrimitiveFields(StringBuilder sb, string tableName, int rowIndex, object item, ref int count)
         {
             if (item == null) return;
             Type t = item.GetType();
-            object itemId = GetMemberValue(item, "id");
+            string itemId = GetBestItemId(item);
             string mod = ObjToString(GetMemberValue(item, "isModExtend"));
+            if (string.IsNullOrEmpty(mod)) mod = ObjToString(GetMemberValue(item, "IsModExtend"));
 
             HashSet<string> done = new HashSet<string>();
 
@@ -206,7 +338,7 @@ namespace MOD_b4qnSo
 
         private static int DumpConfigTables(string label, string file, string[] keywords)
         {
-            Log("[" + label + "] dumping matching config tables...");
+            Log("[" + label + "] scanning g.conf recursively...");
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("table,row,id,field,value,value_display,isModExtend");
             int rows = 0;
@@ -214,40 +346,21 @@ namespace MOD_b4qnSo
 
             try
             {
-                object conf = g.conf;
-                Type ct = conf.GetType();
-                HashSet<string> visited = new HashSet<string>();
+                List<TableRef> candidates = new List<TableRef>();
+                FindMatchingTables(g.conf, "g.conf", keywords, candidates, new HashSet<object>(), new HashSet<string>(), 0);
+                Log("[" + label + "] candidates=" + candidates.Count);
 
-                MemberInfo[] members = ct.GetMembers(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                for (int m = 0; m < members.Length; m++)
+                for (int i = 0; i < candidates.Count; i++)
                 {
-                    MemberInfo mi = members[m];
-                    if (!(mi is FieldInfo) && !(mi is PropertyInfo)) continue;
-                    if (!ContainsAny(mi.Name, keywords)) continue;
-                    if (visited.Contains(mi.Name)) continue;
-                    visited.Add(mi.Name);
-
-                    object confTable = null;
-                    try
-                    {
-                        if (mi is FieldInfo) confTable = ((FieldInfo)mi).GetValue(conf);
-                        else
-                        {
-                            PropertyInfo p = (PropertyInfo)mi;
-                            if (p.GetIndexParameters().Length > 0) continue;
-                            confTable = p.GetValue(conf, null);
-                        }
-                    }
-                    catch { continue; }
-                    if (confTable == null) continue;
-
-                    object allConf = GetMemberValue(confTable, "allConfList");
-                    if (allConf == null) allConf = confTable;
-                    int added = DumpOneTable(sb, mi.Name, allConf, ref rows);
+                    int added = DumpOneTable(sb, candidates[i].path, GetTableList(candidates[i].table), ref rows);
                     if (added > 0)
                     {
                         tables++;
-                        Log("[" + label + "] " + mi.Name + " rows=" + added);
+                        Log("[" + label + "] " + candidates[i].path + " rows=" + added);
+                    }
+                    else
+                    {
+                        Log("[" + label + "] " + candidates[i].path + " rows=0");
                     }
                 }
             }
@@ -261,32 +374,24 @@ namespace MOD_b4qnSo
         private static int DumpOneTable(StringBuilder sb, string tableName, object allConf, ref int longRows)
         {
             int before = longRows;
-            int count = GetListCount(allConf);
-            if (count >= 0)
+            int row = 0;
+            foreach (object raw in EnumerateList(allConf))
             {
-                for (int i = 0; i < count && i < MAX_ROWS_PER_TABLE; i++)
-                {
-                    object item = GetIndexedValue(allConf, i);
-                    if (item == null) continue;
-                    AppendPrimitiveFields(sb, tableName, i, item, ref longRows);
-                }
-            }
-            else
-            {
-                int fails = 0;
-                for (int i = 0; i < MAX_ROWS_PER_TABLE && fails < MAX_FAILS_AFTER_DATA; i++)
-                {
-                    object item = GetIndexedValue(allConf, i);
-                    if (item == null)
-                    {
-                        fails++;
-                        continue;
-                    }
-                    fails = 0;
-                    AppendPrimitiveFields(sb, tableName, i, item, ref longRows);
-                }
+                object item = raw;
+                object key = GetMemberValue(raw, "Key");
+                object value = GetMemberValue(raw, "Value");
+                if (value != null) item = value;
+                AppendPrimitiveFields(sb, tableName, row, item, ref longRows);
+                row++;
             }
             return longRows - before;
+        }
+
+        private class TableRef
+        {
+            public string path;
+            public object table;
+            public TableRef(string p, object t) { path = p; table = t; }
         }
 
         // ========== Main ==========
@@ -302,11 +407,12 @@ namespace MOD_b4qnSo
             int e = DumpSchools();
             int f = DumpNpcs();
             int h = DumpMethods();
+            int p = DumpProbe();
 
             Log("=== DATA DUMP COMPLETE ===");
             Log("Summary rows: luck=" + a + " item=" + b + " drama=" + c
                 + " skill=" + d + " school=" + e + " npc=" + f + " method=" + h
-                + " total=" + (a + b + c + d + e + f + h));
+                + " probe=" + p + " total=" + (a + b + c + d + e + f + h));
         }
 
         // ========== 1. Luck ==========
@@ -321,21 +427,14 @@ namespace MOD_b4qnSo
             {
                 var allConf = g.conf.roleCreateFeature.allConfList;
                 if (allConf == null) { Log("[LUCK] null"); return 0; }
-                int i = 0;
-                while (true)
+                foreach (object raw in EnumerateList(allConf))
                 {
-                    try
-                    {
-                        var item = allConf[i];
-                        if (item == null) break;
-                        string d = DisplayOrRaw(item.name);
-                        sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(d)
-                            + "," + item.type + "," + item.level
-                            + "," + (item.isModExtend ? "MOD" : "BASE"));
-                        count++;
-                        i++;
-                    }
-                    catch { break; }
+                    dynamic item = raw;
+                    string d = DisplayOrRaw(item.name);
+                    sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(d)
+                        + "," + item.type + "," + item.level
+                        + "," + (item.isModExtend ? "MOD" : "BASE"));
+                    count++;
                 }
             }
             catch (Exception ex) { Log("[LUCK] " + ex.Message); }
@@ -355,23 +454,16 @@ namespace MOD_b4qnSo
             {
                 var allConf = g.conf.itemProps.allConfList;
                 if (allConf == null) { Log("[ITEM] null"); return 0; }
-                int i = 0;
-                while (true)
+                foreach (object raw in EnumerateList(allConf))
                 {
-                    try
-                    {
-                        var item = allConf[i];
-                        if (item == null) break;
-                        string nameD = DisplayOrRaw(item.name);
-                        string descD = DisplayOrRaw(item.desc);
-                        sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(nameD)
-                            + "," + item.type + "," + item.className + "," + item.level
-                            + "," + item.worth + "," + Esc(descD)
-                            + "," + (item.isModExtend ? "MOD" : "BASE"));
-                        count++;
-                        i++;
-                    }
-                    catch { break; }
+                    dynamic item = raw;
+                    string nameD = DisplayOrRaw(item.name);
+                    string descD = DisplayOrRaw(item.desc);
+                    sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(nameD)
+                        + "," + item.type + "," + item.className + "," + item.level
+                        + "," + item.worth + "," + Esc(descD)
+                        + "," + (item.isModExtend ? "MOD" : "BASE"));
+                    count++;
                 }
             }
             catch (Exception ex) { Log("[ITEM] " + ex.Message); }
@@ -379,16 +471,14 @@ namespace MOD_b4qnSo
             return count;
         }
 
-        // ========== Generic full dumps for tables that differ between game versions ==========
-
         private int DumpDrama()
         {
-            return DumpConfigTables("DRAMA", "dump_drama.csv", new string[] { "drama", "dialog", "dialogue", "story", "plot" });
+            return DumpConfigTables("DRAMA", "dump_drama.csv", new string[] { "drama", "dialog", "dialogue", "story", "plot", "text" });
         }
 
         private int DumpSkills()
         {
-            return DumpConfigTables("SKILL", "dump_skill.csv", new string[] { "skill", "ability", "martial", "magic", "gong", "schoolfight" });
+            return DumpConfigTables("SKILL", "dump_skill.csv", new string[] { "skill", "ability", "martial", "magic", "gong", "schoolfight", "battle" });
         }
 
         private int DumpSchools()
@@ -403,7 +493,29 @@ namespace MOD_b4qnSo
 
         private int DumpMethods()
         {
-            return DumpConfigTables("METHOD", "dump_method.csv", new string[] { "method", "manual", "book", "formula", "ability", "martial", "skill", "magic", "gong" });
+            return DumpConfigTables("METHOD", "dump_method.csv", new string[] { "method", "manual", "book", "formula", "ability", "martial", "skill", "magic", "gong", "basics" });
+        }
+
+        private int DumpProbe()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("path,type,hasAllConfList,count");
+            int rows = 0;
+            try
+            {
+                List<TableRef> all = new List<TableRef>();
+                FindMatchingTables(g.conf, "g.conf", new string[] { "" }, all, new HashSet<object>(), new HashSet<string>(), 0);
+                for (int i = 0; i < all.Count; i++)
+                {
+                    object list = GetTableList(all[i].table);
+                    sb.AppendLine(Esc(all[i].path) + "," + Esc(all[i].table.GetType().FullName) + ","
+                        + (GetMemberValue(all[i].table, "allConfList") != null) + "," + GetListCount(list));
+                    rows++;
+                }
+            }
+            catch (Exception ex) { Log("[PROBE] " + ex.Message); }
+            Save("dump_probe.csv", sb, rows);
+            return rows;
         }
     }
 }

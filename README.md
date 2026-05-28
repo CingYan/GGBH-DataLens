@@ -28,6 +28,7 @@
 | `dump_school.csv` | 宗門 / 職位相關表 | table, row, id, field, value, value_display, isModExtend |
 | `dump_npc.csv` | NPC / 角色相關表 | table, row, id, field, value, value_display, isModExtend |
 | `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_probe.csv` | 偵測到的配置表清單 | path, type, hasAllConfList, count |
 
 ## 🔧 安裝方式
 
@@ -54,11 +55,17 @@
 - **語言**：C# (.NET Framework 4.7.2)
 - **環境**：IL2CPP
 - **遍歷方式**：優先使用 `Count` / `Item[index]` 反射，沒有 Count 時才用索引探測；避免 IL2CPP list 在特定表只輸出幾筆或提前中斷
-- **泛用表掃描**：drama / npc / school / skill / method 不再綁死單一 `g.conf.xxx` 欄位，而是掃描 `g.conf` 中名稱匹配的配置表並輸出 primitive 欄位 long-form CSV
+- **泛用表掃描**：drama / npc / school / skill / method 不再綁死單一 `g.conf.xxx` 欄位，而是遞迴掃描 `g.conf` 中名稱或型別匹配的配置表並輸出 primitive 欄位 long-form CSV
 - **翻譯**：`ConfLocalText.GetText()` 靜態方法；翻不到時保留原始值
 - **編碼**：UTF-8 with BOM
 
 ## 📋 版本紀錄
+
+### v1.1.1 (2026-05-28)
+- 修正 v1.1.0 只掃描 `g.conf` 第一層導致 `dump_skill.csv` / `dump_drama.csv` 只有 header 的問題
+- 改為遞迴掃描 `g.conf` 內 3 層物件，尋找含 `allConfList` 或可索引資料的配置表
+- 新增 `dump_probe.csv`，列出本次找到的配置表 path / type / count，方便下一輪定位表名
+- generic dumps 會在 log 顯示 candidates 與每張表 rows
 
 ### v1.1.0 (2026-05-28)
 - 修正 drama / npc / school 等表因欄位名稱或版本差異而只輸出幾 KB 或缺表的問題
