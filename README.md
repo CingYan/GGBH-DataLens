@@ -4,13 +4,13 @@
   <img src="preview.png" alt="DataLens Preview" width="500">
 </p>
 
-**鬼谷八荒 DataLens** 是一款[鬼谷八荒（Tale of Immortal）](https://store.steampowered.com/app/1468810/)的資料匯出 MOD，能一鍵將遊戲內六大配置表匯出為 CSV 檔案，方便 MOD 開發者查表、除錯、分析資料。
+**鬼谷八荒 DataLens** 是一款[鬼谷八荒（Tale of Immortal）](https://store.steampowered.com/app/1468810/)的資料匯出 MOD，能一鍵將遊戲內配置表匯出為 CSV 檔案，方便 MOD 開發者查表、除錯、分析資料。
 
 ## ✨ 功能特色
 
-- **六大資料表全量匯出**：氣運、物品、劇情、技能、宗門、NPC
+- **多資料表全量匯出**：氣運、物品、劇情、技能、宗門、NPC、功法 / method 等
 - **MOD / 原生自動標記**：每筆資料自動標記 `MOD` 或 `BASE`，一眼分辨來源
-- **本地化翻譯**：自動將 name key 翻譯為遊戲內顯示的中文名稱
+- **本地化翻譯**：自動將 name key 翻譯為遊戲內顯示的中文名稱，翻不到時保留原始 key，避免只看到空白或純數字
 - **Excel 友善**：UTF-8 BOM 編碼，雙擊即可正確開啟
 - **零操作**：進入存檔後自動匯出，無需任何手動操作
 - **安全無害**：純讀取操作，不修改任何遊戲資料
@@ -23,10 +23,11 @@
 |------|------|------|
 | `dump_luck.csv` | 氣運（先天/後天） | id, key, display, type, level, isModExtend |
 | `dump_item.csv` | 物品 | id, name_key, display, type, className, level, worth, desc_display, isModExtend |
-| `dump_drama.csv` | 劇情 | id, key, value, key_display, value_display, isModExtend |
-| `dump_skill.csv` | 技能 | id, className, className_display, mainSkill, weaponType, magicType, isModExtend |
-| `dump_school.csv` | 宗門名稱 | id, group, name1, name1_display, name2, name2_display, languageType, isModExtend |
-| `dump_npc.csv` | 特定 NPC | id, npcId, clothingName, clothingName_display, flag, model, luck, isModExtend |
+| `dump_drama.csv` | 劇情相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_skill.csv` | 技能相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_school.csv` | 宗門 / 職位相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_npc.csv` | NPC / 角色相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend |
 
 ## 🔧 安裝方式
 
@@ -52,11 +53,18 @@
 - **框架**：MelonLoader MOD System
 - **語言**：C# (.NET Framework 4.7.2)
 - **環境**：IL2CPP
-- **遍歷方式**：索引遍歷 + try-catch 邊界偵測（IL2CPP 的 `IReadOnlyList` 無 `.Count`）
-- **翻譯**：`ConfLocalText.GetText()` 靜態方法
+- **遍歷方式**：優先使用 `Count` / `Item[index]` 反射，沒有 Count 時才用索引探測；避免 IL2CPP list 在特定表只輸出幾筆或提前中斷
+- **泛用表掃描**：drama / npc / school / skill / method 不再綁死單一 `g.conf.xxx` 欄位，而是掃描 `g.conf` 中名稱匹配的配置表並輸出 primitive 欄位 long-form CSV
+- **翻譯**：`ConfLocalText.GetText()` 靜態方法；翻不到時保留原始值
 - **編碼**：UTF-8 with BOM
 
 ## 📋 版本紀錄
+
+### v1.1.0 (2026-05-28)
+- 修正 drama / npc / school 等表因欄位名稱或版本差異而只輸出幾 KB 或缺表的問題
+- 修正 method 只看到數字：新增 `dump_method.csv`，並以 long-form 輸出所有 primitive 欄位與可翻譯顯示值
+- 改為掃描 `g.conf` 內符合關鍵字的配置表，不再只綁死單一表名
+- CSV 明確寫到遊戲根目錄，log 會印出完整路徑
 
 ### v1.0.0 (2026-04-03)
 - 初始版本
