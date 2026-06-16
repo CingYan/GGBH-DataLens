@@ -31,6 +31,7 @@
 | `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
 | `dump_mods.csv` | MOD 來源對照 | sourceModId, sourceModName |
 | `dump_probe.csv` | 偵測到的配置表與 row 容器清單 | path, type, rowSource, sourceType, count, sampleRows |
+| `dump_source_probe.csv` | MOD 來源欄位探測 | table, row, id, member, memberType, value |
 
 ## 🔧 安裝方式
 
@@ -63,6 +64,11 @@
 - **編碼**：UTF-8 with BOM
 
 ## 📋 版本紀錄
+
+### v1.2.5 (2026-06-16)
+- Hotfix：修正 MOD row 已能匯出，但 `sourceModId` / `sourceModName` 空白時不易判讀的問題
+- MOD row 若無法從 row 本身讀出來源 ID，會先標記為 `UNRESOLVED_MOD` / `Unknown MOD source`
+- 新增 `dump_source_probe.csv`，針對來源未知的 MOD row 輸出可疑的 source/mod/extend 欄位，方便後續定位真正的來源欄位
 
 ### v1.2.4 (2026-06-16)
 - Hotfix：修正 v1.2.3 已找到配置表 candidates，但每張表 rows 仍為 0 的問題

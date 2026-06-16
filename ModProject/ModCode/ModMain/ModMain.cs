@@ -11,11 +11,12 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.2.4";
+        private const string VERSION = "datalens-v1.2.5";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
         private const int MAX_SCAN_DEPTH = 3;
         private const int MAX_META_FILE_BYTES = 1024 * 1024;
+        private const int MAX_SOURCE_PROBE_ROWS = 1000;
         private static Dictionary<string, string> modNameById = new Dictionary<string, string>();
 
         private static void Log(string msg)
@@ -603,9 +604,24 @@ namespace MOD_b4qnSo
         private static string SourceModName(string sourceModId)
         {
             if (string.IsNullOrEmpty(sourceModId)) return "";
+            if (sourceModId == "UNRESOLVED_MOD") return "Unknown MOD source";
             string name = "";
             if (modNameById.TryGetValue(sourceModId, out name)) return name;
             return "";
+        }
+
+        private static bool IsModFlag(string value)
+        {
+            string s = (value ?? "").Trim().ToLowerInvariant();
+            return s == "mod" || s == "true" || s == "1";
+        }
+
+        private static void MarkUnresolvedMod(string mod, ref string sourceModId, ref string sourceModName)
+        {
+            if (!string.IsNullOrEmpty(sourceModId)) return;
+            if (!IsModFlag(mod)) return;
+            sourceModId = "UNRESOLVED_MOD";
+            sourceModName = SourceModName(sourceModId);
         }
 
         private static void AppendPrimitiveFields(StringBuilder sb, string tableName, int rowIndex, object item, ref int count)
@@ -617,6 +633,7 @@ namespace MOD_b4qnSo
             if (string.IsNullOrEmpty(mod)) mod = ObjToString(GetMemberValue(item, "IsModExtend"));
             string sourceModId = FindSourceModId(item);
             string sourceModName = SourceModName(sourceModId);
+            MarkUnresolvedMod(mod, ref sourceModId, ref sourceModName);
 
             HashSet<string> done = new HashSet<string>();
 
@@ -742,12 +759,13 @@ namespace MOD_b4qnSo
             int e = DumpSchools();
             int f = DumpNpcs();
             int h = DumpMethods();
+            int s = DumpSourceProbe();
             int p = DumpProbe();
 
             Log("=== DATA DUMP COMPLETE ===");
             Log("Summary rows: luck=" + a + " item=" + b + " drama=" + c
                 + " skill=" + d + " school=" + e + " npc=" + f + " method=" + h
-                + " probe=" + p + " total=" + (a + b + c + d + e + f + h));
+                + " sourceProbe=" + s + " probe=" + p + " total=" + (a + b + c + d + e + f + h));
         }
 
         // ========== 1. Luck ==========
@@ -767,10 +785,13 @@ namespace MOD_b4qnSo
                     dynamic item = raw;
                     string d = DisplayOrRaw(item.name);
                     string sourceModId = FindSourceModId(raw);
+                    string sourceModName = SourceModName(sourceModId);
+                    string mod = item.isModExtend ? "MOD" : "BASE";
+                    MarkUnresolvedMod(mod, ref sourceModId, ref sourceModName);
                     sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(d)
                         + "," + item.type + "," + item.level
-                        + "," + (item.isModExtend ? "MOD" : "BASE")
-                        + "," + Esc(sourceModId) + "," + Esc(SourceModName(sourceModId)));
+                        + "," + mod
+                        + "," + Esc(sourceModId) + "," + Esc(sourceModName));
                     count++;
                 }
             }
@@ -797,11 +818,14 @@ namespace MOD_b4qnSo
                     string nameD = DisplayOrRaw(item.name);
                     string descD = DisplayOrRaw(item.desc);
                     string sourceModId = FindSourceModId(raw);
+                    string sourceModName = SourceModName(sourceModId);
+                    string mod = item.isModExtend ? "MOD" : "BASE";
+                    MarkUnresolvedMod(mod, ref sourceModId, ref sourceModName);
                     sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(nameD)
                         + "," + item.type + "," + item.className + "," + item.level
                         + "," + item.worth + "," + Esc(descD)
-                        + "," + (item.isModExtend ? "MOD" : "BASE")
-                        + "," + Esc(sourceModId) + "," + Esc(SourceModName(sourceModId)));
+                        + "," + mod
+                        + "," + Esc(sourceModId) + "," + Esc(sourceModName));
                     count++;
                 }
             }
@@ -833,6 +857,80 @@ namespace MOD_b4qnSo
         private int DumpMethods()
         {
             return DumpConfigTables("METHOD", "dump_method.csv", new string[] { "method", "manual", "book", "formula", "ability", "martial", "skill", "magic", "gong", "basics" });
+        }
+
+        private int DumpSourceProbe()
+        {
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("table,row,id,member,memberType,value");
+            int rows = 0;
+            try
+            {
+                rows += DumpSourceProbeTable(sb, "g.conf.itemProps", g.conf.itemProps, MAX_SOURCE_PROBE_ROWS - rows);
+                if (rows < MAX_SOURCE_PROBE_ROWS)
+                    rows += DumpSourceProbeTable(sb, "g.conf.roleCreateFeature", g.conf.roleCreateFeature, MAX_SOURCE_PROBE_ROWS - rows);
+            }
+            catch (Exception ex) { Log("[SOURCE_PROBE] " + ex.Message); }
+            Save("dump_source_probe.csv", sb, rows);
+            return rows;
+        }
+
+        private int DumpSourceProbeTable(StringBuilder sb, string tableName, object table, int remaining)
+        {
+            int rows = 0;
+            int row = 0;
+            foreach (object item in EnumerateTableRows(table))
+            {
+                if (rows >= remaining) break;
+                string mod = ObjToString(GetMemberValue(item, "isModExtend"));
+                if (string.IsNullOrEmpty(mod)) mod = ObjToString(GetMemberValue(item, "IsModExtend"));
+                if (!IsModFlag(mod)) { row++; continue; }
+                string sourceModId = FindSourceModId(item);
+                if (!string.IsNullOrEmpty(sourceModId)) { row++; continue; }
+
+                rows += AppendSourceProbeMembers(sb, tableName, row, item, remaining - rows);
+                row++;
+            }
+            return rows;
+        }
+
+        private int AppendSourceProbeMembers(StringBuilder sb, string tableName, int row, object item, int remaining)
+        {
+            int rows = 0;
+            if (item == null || remaining <= 0) return 0;
+            string id = GetBestItemId(item);
+            Type t = item.GetType();
+            BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+
+            FieldInfo[] fields = new FieldInfo[0];
+            try { fields = t.GetFields(flags); } catch { }
+            for (int i = 0; i < fields.Length && rows < remaining; i++)
+            {
+                FieldInfo f = fields[i];
+                if (f.Name.Contains("k__BackingField")) continue;
+                if (!IsLikelyModIdField(f.Name) && !f.Name.ToLowerInvariant().Contains("mod")) continue;
+                object value = null;
+                try { value = f.GetValue(item); } catch { continue; }
+                sb.AppendLine(Esc(tableName) + "," + row + "," + Esc(id) + "," + Esc("field:" + f.Name)
+                    + "," + Esc(f.FieldType.FullName) + "," + Esc(value));
+                rows++;
+            }
+
+            PropertyInfo[] props = new PropertyInfo[0];
+            try { props = t.GetProperties(flags); } catch { }
+            for (int i = 0; i < props.Length && rows < remaining; i++)
+            {
+                PropertyInfo p = props[i];
+                if (p.GetIndexParameters().Length > 0) continue;
+                if (!IsLikelyModIdField(p.Name) && !p.Name.ToLowerInvariant().Contains("mod")) continue;
+                object value = null;
+                try { value = p.GetValue(item, null); } catch { continue; }
+                sb.AppendLine(Esc(tableName) + "," + row + "," + Esc(id) + "," + Esc("prop:" + p.Name)
+                    + "," + Esc(p.PropertyType.FullName) + "," + Esc(value));
+                rows++;
+            }
+
+            return rows;
         }
 
         private int DumpProbe()
