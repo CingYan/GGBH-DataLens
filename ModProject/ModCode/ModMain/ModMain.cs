@@ -4,16 +4,19 @@ using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using MelonLoader;
 
 namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.1.1";
+        private const string VERSION = "datalens-v1.2.0";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
-        private const int MAX_SCAN_DEPTH = 3;
+        private const int MAX_SCAN_DEPTH = 5;
+        private const int MAX_META_FILE_BYTES = 1024 * 1024;
+        private static Dictionary<string, string> modNameById = new Dictionary<string, string>();
 
         private static void Log(string msg)
         {
@@ -77,6 +80,176 @@ namespace MOD_b4qnSo
             catch (Exception ex) { Log("[" + file + "] write error: " + ex.Message); }
         }
 
+        private static string GameRoot()
+        {
+            string dir = AppDomain.CurrentDomain.BaseDirectory;
+            return string.IsNullOrEmpty(dir) ? "." : dir;
+        }
+
+        private static void AddModName(string id, string name)
+        {
+            if (string.IsNullOrEmpty(id)) return;
+            if (string.IsNullOrEmpty(name)) return;
+            if (!modNameById.ContainsKey(id)) modNameById[id] = name;
+        }
+
+        private static string CleanMetaName(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return "";
+            string s = raw.Replace("\\\"", "\"").Replace("\\n", " ").Replace("\\r", " ").Trim();
+            if (s.Length >= 2 && s.StartsWith("\"") && s.EndsWith("\"")) s = s.Substring(1, s.Length - 2);
+            return s.Trim();
+        }
+
+        private static string ExtractNameFromText(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return "";
+            string[] patterns = new string[]
+            {
+                "\"(?:name|Name|title|Title|modName|ModName|displayName|DisplayName)\"\\s*[:=]\\s*\"([^\"]+)\"",
+                "(?:name|Name|title|Title|modName|ModName|displayName|DisplayName)\\s*[:=]\\s*([^\\r\\n,}]+)"
+            };
+            for (int i = 0; i < patterns.Length; i++)
+            {
+                try
+                {
+                    Match m = Regex.Match(text, patterns[i]);
+                    if (m.Success) return CleanMetaName(m.Groups[1].Value);
+                }
+                catch { }
+            }
+            return "";
+        }
+
+        private static string TryReadMetaName(string file)
+        {
+            try
+            {
+                FileInfo info = new FileInfo(file);
+                if (!info.Exists || info.Length <= 0 || info.Length > MAX_META_FILE_BYTES) return "";
+                return ExtractNameFromText(File.ReadAllText(file));
+            }
+            catch { return ""; }
+        }
+
+        private static string FindModNameInDirectory(string dir)
+        {
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return "";
+            string[] names = new string[]
+            {
+                "mod.info", "mod.json", "info.json", "workshop.json",
+                "ModData.cache", "ModProject/ModData.cache", "ModExportData.cache"
+            };
+            for (int i = 0; i < names.Length; i++)
+            {
+                string name = TryReadMetaName(Path.Combine(dir, names[i]));
+                if (!string.IsNullOrEmpty(name)) return name;
+            }
+
+            try
+            {
+                string[] files = Directory.GetFiles(dir, "*.json", SearchOption.TopDirectoryOnly);
+                for (int i = 0; i < files.Length; i++)
+                {
+                    string name = TryReadMetaName(files[i]);
+                    if (!string.IsNullOrEmpty(name)) return name;
+                }
+            }
+            catch { }
+
+            return "";
+        }
+
+        private static void ScanWorkshopMods(string gameRoot)
+        {
+            try
+            {
+                DirectoryInfo root = new DirectoryInfo(gameRoot);
+                DirectoryInfo steamapps = null;
+                DirectoryInfo p = root;
+                while (p != null)
+                {
+                    if (string.Equals(p.Name, "steamapps", StringComparison.OrdinalIgnoreCase))
+                    {
+                        steamapps = p;
+                        break;
+                    }
+                    p = p.Parent;
+                }
+                if (steamapps == null) return;
+
+                string workshop = Path.Combine(steamapps.FullName, "workshop", "content", "1468810");
+                ScanWorkshopManifest(Path.Combine(steamapps.FullName, "workshop", "appworkshop_1468810.acf"));
+                if (!Directory.Exists(workshop)) return;
+                string[] dirs = Directory.GetDirectories(workshop);
+                for (int i = 0; i < dirs.Length; i++)
+                {
+                    string id = Path.GetFileName(dirs[i]);
+                    string name = FindModNameInDirectory(dirs[i]);
+                    if (string.IsNullOrEmpty(name)) name = id;
+                    AddModName(id, name);
+                }
+                Log("[MODMAP] workshop mods=" + modNameById.Count);
+            }
+            catch (Exception ex) { Log("[MODMAP] workshop scan error: " + ex.Message); }
+        }
+
+        private static void ScanWorkshopManifest(string manifest)
+        {
+            try
+            {
+                if (!File.Exists(manifest)) return;
+                string text = File.ReadAllText(manifest);
+                MatchCollection blocks = Regex.Matches(text, "\"(\\d{6,})\"\\s*\\{([^\\}]*)\\}", RegexOptions.Singleline);
+                for (int i = 0; i < blocks.Count; i++)
+                {
+                    string id = blocks[i].Groups[1].Value;
+                    string body = blocks[i].Groups[2].Value;
+                    Match title = Regex.Match(body, "\"title\"\\s+\"([^\"]+)\"");
+                    if (title.Success) AddModName(id, CleanMetaName(title.Groups[1].Value));
+                }
+                Log("[MODMAP] workshop manifest ids=" + blocks.Count);
+            }
+            catch (Exception ex) { Log("[MODMAP] manifest scan error: " + ex.Message); }
+        }
+
+        private static void ScanLocalMods(string gameRoot)
+        {
+            try
+            {
+                string local = Path.Combine(gameRoot, "ModExportData");
+                if (!Directory.Exists(local)) return;
+                string[] dirs = Directory.GetDirectories(local);
+                for (int i = 0; i < dirs.Length; i++)
+                {
+                    string id = Path.GetFileName(dirs[i]);
+                    string name = FindModNameInDirectory(dirs[i]);
+                    if (string.IsNullOrEmpty(name)) name = id;
+                    AddModName(id, name);
+                }
+                Log("[MODMAP] local mods=" + modNameById.Count);
+            }
+            catch (Exception ex) { Log("[MODMAP] local scan error: " + ex.Message); }
+        }
+
+        private static void BuildModNameMap()
+        {
+            modNameById.Clear();
+            string root = GameRoot();
+            ScanWorkshopMods(root);
+            ScanLocalMods(root);
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("sourceModId,sourceModName");
+            int count = 0;
+            foreach (KeyValuePair<string, string> pair in modNameById)
+            {
+                sb.AppendLine(Esc(pair.Key) + "," + Esc(pair.Value));
+                count++;
+            }
+            Save("dump_mods.csv", sb, count);
+        }
+
         private static bool ContainsAny(string haystack, string[] needles)
         {
             if (string.IsNullOrEmpty(haystack)) return false;
@@ -84,6 +257,7 @@ namespace MOD_b4qnSo
             for (int i = 0; i < needles.Length; i++)
             {
                 string n = needles[i];
+                if (n == "") return true;
                 if (!string.IsNullOrEmpty(n) && h.Contains(n.ToLowerInvariant())) return true;
             }
             return false;
@@ -284,6 +458,67 @@ namespace MOD_b4qnSo
             return "";
         }
 
+        private static bool IsLikelyModIdField(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return false;
+            string n = name.ToLowerInvariant();
+            if (n.Contains("ismod")) return false;
+            return n.Contains("workshop") || n.Contains("modid") || n.Contains("mod_id")
+                || n.Contains("modsid") || n.Contains("extend") || n.Contains("source");
+        }
+
+        private static string NormalizeSourceModId(object value)
+        {
+            string s = ObjToString(value).Trim();
+            if (string.IsNullOrEmpty(s)) return "";
+            Match m = Regex.Match(s, "\\d{6,}");
+            if (m.Success) return m.Value;
+            return "";
+        }
+
+        private static string FindSourceModId(object item)
+        {
+            if (item == null) return "";
+            Type t = item.GetType();
+
+            FieldInfo[] fields = t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo f = fields[i];
+                if (!IsLikelyModIdField(f.Name)) continue;
+                try
+                {
+                    string id = NormalizeSourceModId(f.GetValue(item));
+                    if (!string.IsNullOrEmpty(id)) return id;
+                }
+                catch { }
+            }
+
+            PropertyInfo[] props = t.GetProperties(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            for (int i = 0; i < props.Length; i++)
+            {
+                PropertyInfo p = props[i];
+                if (p.GetIndexParameters().Length > 0) continue;
+                if (!IsLikelyModIdField(p.Name)) continue;
+                try
+                {
+                    string id = NormalizeSourceModId(p.GetValue(item, null));
+                    if (!string.IsNullOrEmpty(id)) return id;
+                }
+                catch { }
+            }
+
+            return "";
+        }
+
+        private static string SourceModName(string sourceModId)
+        {
+            if (string.IsNullOrEmpty(sourceModId)) return "";
+            string name = "";
+            if (modNameById.TryGetValue(sourceModId, out name)) return name;
+            return "";
+        }
+
         private static void AppendPrimitiveFields(StringBuilder sb, string tableName, int rowIndex, object item, ref int count)
         {
             if (item == null) return;
@@ -291,6 +526,8 @@ namespace MOD_b4qnSo
             string itemId = GetBestItemId(item);
             string mod = ObjToString(GetMemberValue(item, "isModExtend"));
             if (string.IsNullOrEmpty(mod)) mod = ObjToString(GetMemberValue(item, "IsModExtend"));
+            string sourceModId = FindSourceModId(item);
+            string sourceModName = SourceModName(sourceModId);
 
             HashSet<string> done = new HashSet<string>();
 
@@ -304,7 +541,7 @@ namespace MOD_b4qnSo
                 {
                     object val = f.GetValue(item);
                     if (!LooksLikePrimitive(val)) continue;
-                    AppendLongRow(sb, tableName, rowIndex, itemId, f.Name, val, mod);
+                    AppendLongRow(sb, tableName, rowIndex, itemId, f.Name, val, mod, sourceModId, sourceModName);
                     done.Add(f.Name);
                     count++;
                 }
@@ -321,7 +558,7 @@ namespace MOD_b4qnSo
                 {
                     object val = p.GetValue(item, null);
                     if (!LooksLikePrimitive(val)) continue;
-                    AppendLongRow(sb, tableName, rowIndex, itemId, p.Name, val, mod);
+                    AppendLongRow(sb, tableName, rowIndex, itemId, p.Name, val, mod, sourceModId, sourceModName);
                     done.Add(p.Name);
                     count++;
                 }
@@ -329,18 +566,19 @@ namespace MOD_b4qnSo
             }
         }
 
-        private static void AppendLongRow(StringBuilder sb, string tableName, int rowIndex, object itemId, string fieldName, object value, string mod)
+        private static void AppendLongRow(StringBuilder sb, string tableName, int rowIndex, object itemId, string fieldName, object value, string mod, string sourceModId, string sourceModName)
         {
             string display = Tr(value);
             sb.AppendLine(Esc(tableName) + "," + rowIndex + "," + Esc(itemId) + "," + Esc(fieldName)
-                + "," + Esc(value) + "," + Esc(display) + "," + Esc(mod));
+                + "," + Esc(value) + "," + Esc(display) + "," + Esc(mod)
+                + "," + Esc(sourceModId) + "," + Esc(sourceModName));
         }
 
         private static int DumpConfigTables(string label, string file, string[] keywords)
         {
             Log("[" + label + "] scanning g.conf recursively...");
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("table,row,id,field,value,value_display,isModExtend");
+            sb.AppendLine("table,row,id,field,value,value_display,isModExtend,sourceModId,sourceModName");
             int rows = 0;
             int tables = 0;
 
@@ -399,6 +637,7 @@ namespace MOD_b4qnSo
         private void RunAllDumps()
         {
             Log("=== DATA DUMP START ===");
+            BuildModNameMap();
 
             int a = DumpLuck();
             int b = DumpItems();
@@ -421,7 +660,7 @@ namespace MOD_b4qnSo
         {
             Log("[LUCK] dumping ALL...");
             var sb = new StringBuilder();
-            sb.AppendLine("id,key,display,type,level,isModExtend");
+            sb.AppendLine("id,key,display,type,level,isModExtend,sourceModId,sourceModName");
             int count = 0;
             try
             {
@@ -431,9 +670,11 @@ namespace MOD_b4qnSo
                 {
                     dynamic item = raw;
                     string d = DisplayOrRaw(item.name);
+                    string sourceModId = FindSourceModId(raw);
                     sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(d)
                         + "," + item.type + "," + item.level
-                        + "," + (item.isModExtend ? "MOD" : "BASE"));
+                        + "," + (item.isModExtend ? "MOD" : "BASE")
+                        + "," + Esc(sourceModId) + "," + Esc(SourceModName(sourceModId)));
                     count++;
                 }
             }
@@ -448,7 +689,7 @@ namespace MOD_b4qnSo
         {
             Log("[ITEM] dumping ALL...");
             var sb = new StringBuilder();
-            sb.AppendLine("id,name_key,display,type,className,level,worth,desc_display,isModExtend");
+            sb.AppendLine("id,name_key,display,type,className,level,worth,desc_display,isModExtend,sourceModId,sourceModName");
             int count = 0;
             try
             {
@@ -459,10 +700,12 @@ namespace MOD_b4qnSo
                     dynamic item = raw;
                     string nameD = DisplayOrRaw(item.name);
                     string descD = DisplayOrRaw(item.desc);
+                    string sourceModId = FindSourceModId(raw);
                     sb.AppendLine(item.id + "," + Esc(item.name) + "," + Esc(nameD)
                         + "," + item.type + "," + item.className + "," + item.level
                         + "," + item.worth + "," + Esc(descD)
-                        + "," + (item.isModExtend ? "MOD" : "BASE"));
+                        + "," + (item.isModExtend ? "MOD" : "BASE")
+                        + "," + Esc(sourceModId) + "," + Esc(SourceModName(sourceModId)));
                     count++;
                 }
             }

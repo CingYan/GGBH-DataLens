@@ -10,6 +10,7 @@
 
 - **多資料表全量匯出**：氣運、物品、劇情、技能、宗門、NPC、功法 / method 等
 - **MOD / 原生自動標記**：每筆資料自動標記 `MOD` 或 `BASE`，一眼分辨來源
+- **MOD 來源名稱對照**：新增 `sourceModId` / `sourceModName` 欄位，並輸出 `dump_mods.csv` 對照表，協助把 Workshop ID 對回 MOD 名稱
 - **本地化翻譯**：自動將 name key 翻譯為遊戲內顯示的中文名稱，翻不到時保留原始 key，避免只看到空白或純數字
 - **Excel 友善**：UTF-8 BOM 編碼，雙擊即可正確開啟
 - **零操作**：進入存檔後自動匯出，無需任何手動操作
@@ -21,13 +22,14 @@
 
 | 檔案 | 內容 | 欄位 |
 |------|------|------|
-| `dump_luck.csv` | 氣運（先天/後天） | id, key, display, type, level, isModExtend |
-| `dump_item.csv` | 物品 | id, name_key, display, type, className, level, worth, desc_display, isModExtend |
-| `dump_drama.csv` | 劇情相關表 | table, row, id, field, value, value_display, isModExtend |
-| `dump_skill.csv` | 技能相關表 | table, row, id, field, value, value_display, isModExtend |
-| `dump_school.csv` | 宗門 / 職位相關表 | table, row, id, field, value, value_display, isModExtend |
-| `dump_npc.csv` | NPC / 角色相關表 | table, row, id, field, value, value_display, isModExtend |
-| `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend |
+| `dump_luck.csv` | 氣運（先天/後天） | id, key, display, type, level, isModExtend, sourceModId, sourceModName |
+| `dump_item.csv` | 物品 | id, name_key, display, type, className, level, worth, desc_display, isModExtend, sourceModId, sourceModName |
+| `dump_drama.csv` | 劇情相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
+| `dump_skill.csv` | 技能相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
+| `dump_school.csv` | 宗門 / 職位相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
+| `dump_npc.csv` | NPC / 角色相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
+| `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
+| `dump_mods.csv` | MOD 來源對照 | sourceModId, sourceModName |
 | `dump_probe.csv` | 偵測到的配置表清單 | path, type, hasAllConfList, count |
 
 ## 🔧 安裝方式
@@ -56,10 +58,18 @@
 - **環境**：IL2CPP
 - **遍歷方式**：優先使用 `Count` / `Item[index]` 反射，沒有 Count 時才用索引探測；避免 IL2CPP list 在特定表只輸出幾筆或提前中斷
 - **泛用表掃描**：drama / npc / school / skill / method 不再綁死單一 `g.conf.xxx` 欄位，而是遞迴掃描 `g.conf` 中名稱或型別匹配的配置表並輸出 primitive 欄位 long-form CSV
+- **來源解析**：讀取 Steam Workshop manifest、Workshop 目錄與本地 ModExportData 中的 metadata，建立 Workshop ID → MOD 名稱對照
 - **翻譯**：`ConfLocalText.GetText()` 靜態方法；翻不到時保留原始值
 - **編碼**：UTF-8 with BOM
 
 ## 📋 版本紀錄
+
+### v1.2.0 (2026-06-16)
+- 新增 `dump_mods.csv`，輸出 Workshop / 本地 MOD 的 ID 與名稱對照
+- 所有主要 CSV 新增 `sourceModId` / `sourceModName` 欄位，協助定位某筆氣運、物品、功法、劇情、NPC 或宗門資料來自哪個 MOD
+- 讀取 Steam `appworkshop_1468810.acf`、Workshop 目錄與本地 `ModExportData` metadata，盡量將純數字 Workshop ID 轉成實際 MOD 名稱
+- 將 `g.conf` 遞迴掃描深度提高到 5 層，降低功法 / 劇情 / NPC / 宗門表藏在較深層時漏掃的機率
+- 修正 `dump_probe.csv` 空關鍵字不會命中任何表的問題，讓 probe 能真正列出偵測到的配置表
 
 ### v1.1.1 (2026-05-28)
 - 修正 v1.1.0 只掃描 `g.conf` 第一層導致 `dump_skill.csv` / `dump_drama.csv` 只有 header 的問題
