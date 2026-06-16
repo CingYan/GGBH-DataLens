@@ -64,6 +64,11 @@
 
 ## 📋 版本紀錄
 
+### v1.2.2 (2026-06-16)
+- Hotfix：修正 v1.2.1 仍可能在 `[DRAMA] scanning g.conf recursively...` 階段閃退的問題
+- 掃描時先以路徑 / 型別名稱命中關鍵字後，才嘗試判斷該物件是否為配置表，避免對所有 `g.conf` 物件呼叫 `Count` / `Item[index]`
+- 遞迴探索改為只走 fields，不再呼叫 IL2CPP property getters；犧牲少量覆蓋率，優先避免 native crash
+
 ### v1.2.1 (2026-06-16)
 - Hotfix：回退 v1.2.0 的高風險深層掃描，避免掃描 `g.conf` 深層 IL2CPP 物件時造成遊戲閃退
 - `g.conf` 遞迴掃描深度維持 3 層，優先保穩定

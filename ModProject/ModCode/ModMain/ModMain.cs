@@ -11,7 +11,7 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.2.1";
+        private const string VERSION = "datalens-v1.2.2";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
         private const int MAX_SCAN_DEPTH = 3;
@@ -392,20 +392,18 @@ namespace MOD_b4qnSo
             if (seen.Contains(root)) return;
             seen.Add(root);
 
-            if (LooksLikeConfTable(root))
+            string typeName = "";
+            try { typeName = root.GetType().FullName; } catch { }
+            bool nameHit = ContainsAny(path, keywords);
+            bool typeHit = ContainsAny(typeName, keywords);
+
+            if ((nameHit || typeHit) && LooksLikeConfTable(root))
             {
-                bool nameHit = ContainsAny(path, keywords);
-                string typeName = "";
-                try { typeName = root.GetType().FullName; } catch { }
-                bool typeHit = ContainsAny(typeName, keywords);
-                if (nameHit || typeHit)
+                string key = TableKey(path, root);
+                if (!tableSeen.Contains(key))
                 {
-                    string key = TableKey(path, root);
-                    if (!tableSeen.Contains(key))
-                    {
-                        tableSeen.Add(key);
-                        result.Add(new TableRef(path, root));
-                    }
+                    tableSeen.Add(key);
+                    result.Add(new TableRef(path, root));
                 }
                 return;
             }
@@ -423,15 +421,8 @@ namespace MOD_b4qnSo
                 FindMatchingTables(value, path + "." + f.Name, keywords, result, seen, tableSeen, depth + 1);
             }
 
-            PropertyInfo[] props = t.GetProperties(flags);
-            for (int i = 0; i < props.Length; i++)
-            {
-                PropertyInfo p = props[i];
-                if (p.GetIndexParameters().Length > 0) continue;
-                object value = null;
-                try { value = p.GetValue(root, null); } catch { continue; }
-                FindMatchingTables(value, path + "." + p.Name, keywords, result, seen, tableSeen, depth + 1);
-            }
+            // IL2CPP property getters can execute native code and crash the game.
+            // Field traversal is less complete but much safer for a diagnostic dumper.
         }
 
         private static object GetTableList(object confTable)
