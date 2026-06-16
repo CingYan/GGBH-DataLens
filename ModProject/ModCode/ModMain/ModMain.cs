@@ -11,10 +11,10 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.2.0";
+        private const string VERSION = "datalens-v1.2.1";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
-        private const int MAX_SCAN_DEPTH = 5;
+        private const int MAX_SCAN_DEPTH = 3;
         private const int MAX_META_FILE_BYTES = 1024 * 1024;
         private static Dictionary<string, string> modNameById = new Dictionary<string, string>();
 
@@ -257,7 +257,6 @@ namespace MOD_b4qnSo
             for (int i = 0; i < needles.Length; i++)
             {
                 string n = needles[i];
-                if (n == "") return true;
                 if (!string.IsNullOrEmpty(n) && h.Contains(n.ToLowerInvariant())) return true;
             }
             return false;
@@ -747,7 +746,9 @@ namespace MOD_b4qnSo
             try
             {
                 List<TableRef> all = new List<TableRef>();
-                FindMatchingTables(g.conf, "g.conf", new string[] { "" }, all, new HashSet<object>(), new HashSet<string>(), 0);
+                FindMatchingTables(g.conf, "g.conf",
+                    new string[] { "drama", "dialog", "story", "plot", "skill", "ability", "martial", "magic", "gong", "school", "sect", "branch", "post", "npc", "unit", "role", "specific", "method", "manual", "book", "formula", "item", "props", "luck", "feature" },
+                    all, new HashSet<object>(), new HashSet<string>(), 0);
                 for (int i = 0; i < all.Count; i++)
                 {
                     object list = GetTableList(all[i].table);

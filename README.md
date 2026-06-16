@@ -64,12 +64,17 @@
 
 ## 📋 版本紀錄
 
+### v1.2.1 (2026-06-16)
+- Hotfix：回退 v1.2.0 的高風險深層掃描，避免掃描 `g.conf` 深層 IL2CPP 物件時造成遊戲閃退
+- `g.conf` 遞迴掃描深度維持 3 層，優先保穩定
+- `dump_probe.csv` 改為只掃疑似配置表關鍵字，不再用空關鍵字全域掃描所有 `g.conf` 物件
+- 保留 v1.2.0 的 `dump_mods.csv` 與 `sourceModId` / `sourceModName` 欄位
+
 ### v1.2.0 (2026-06-16)
 - 新增 `dump_mods.csv`，輸出 Workshop / 本地 MOD 的 ID 與名稱對照
 - 所有主要 CSV 新增 `sourceModId` / `sourceModName` 欄位，協助定位某筆氣運、物品、功法、劇情、NPC 或宗門資料來自哪個 MOD
 - 讀取 Steam `appworkshop_1468810.acf`、Workshop 目錄與本地 `ModExportData` metadata，盡量將純數字 Workshop ID 轉成實際 MOD 名稱
-- 將 `g.conf` 遞迴掃描深度提高到 5 層，降低功法 / 劇情 / NPC / 宗門表藏在較深層時漏掃的機率
-- 修正 `dump_probe.csv` 空關鍵字不會命中任何表的問題，讓 probe 能真正列出偵測到的配置表
+- 曾嘗試將 `g.conf` 遞迴掃描深度提高到 5 層並讓 `dump_probe.csv` 全域掃描；此做法在 v1.2.1 回退，以穩定性優先
 
 ### v1.1.1 (2026-05-28)
 - 修正 v1.1.0 只掃描 `g.conf` 第一層導致 `dump_skill.csv` / `dump_drama.csv` 只有 header 的問題
