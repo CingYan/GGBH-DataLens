@@ -11,7 +11,7 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.2.3";
+        private const string VERSION = "datalens-v1.2.4";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
         private const int MAX_SCAN_DEPTH = 3;
@@ -368,6 +368,39 @@ namespace MOD_b4qnSo
                 if (yielded > 0) yield break;
             }
 
+            object reflectedEnumerator = null;
+            try
+            {
+                MethodInfo getEnumerator = list.GetType().GetMethod("GetEnumerator", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                if (getEnumerator != null) reflectedEnumerator = getEnumerator.Invoke(list, null);
+            }
+            catch { }
+            if (reflectedEnumerator != null)
+            {
+                int yielded = 0;
+                Type et = reflectedEnumerator.GetType();
+                MethodInfo moveNext = null;
+                PropertyInfo currentProp = null;
+                try { moveNext = et.GetMethod("MoveNext", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); } catch { }
+                try { currentProp = et.GetProperty("Current", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance); } catch { }
+                if (moveNext != null && currentProp != null)
+                {
+                    while (yielded < MAX_ROWS_PER_TABLE)
+                    {
+                        bool ok = false;
+                        try { ok = Convert.ToBoolean(moveNext.Invoke(reflectedEnumerator, null)); } catch { break; }
+                        if (!ok) break;
+                        object raw = null;
+                        try { raw = currentProp.GetValue(reflectedEnumerator, null); } catch { }
+                        if (raw == null) continue;
+                        object value = GetMemberValue(raw, "Value");
+                        yield return value ?? raw;
+                        yielded++;
+                    }
+                    if (yielded > 0) yield break;
+                }
+            }
+
             int count = GetListCount(list);
             if (count >= 0)
             {
@@ -450,17 +483,58 @@ namespace MOD_b4qnSo
             }
         }
 
-        private static object GetTableList(object confTable)
+        private static IEnumerable<RowSource> GetTableRowSources(object confTable)
         {
-            object allConf = GetMemberValue(confTable, "allConfList");
-            if (allConf != null) return allConf;
-            allConf = GetMemberValue(confTable, "_allConfList");
-            if (allConf != null) return allConf;
-            allConf = GetMemberValue(confTable, "allConfDic");
-            if (allConf != null) return allConf;
-            allConf = GetMemberValue(confTable, "_allConfDic");
-            if (allConf != null) return allConf;
-            return confTable;
+            if (confTable == null) yield break;
+
+            HashSet<object> seen = new HashSet<object>();
+            string[] names = new string[]
+            {
+                "allConfList", "_allConfList", "allConfDic", "_allConfDic",
+                "allConfDict", "_allConfDict", "confList", "ConfList", "confDic", "ConfDic",
+                "list", "_list", "items", "_items", "values", "_values",
+                "data", "_data", "dic", "_dic", "dict", "_dict",
+                "m_list", "m_dic", "valueList", "ValueList"
+            };
+
+            for (int i = 0; i < names.Length; i++)
+            {
+                object value = GetMemberValue(confTable, names[i]);
+                if (value == null || seen.Contains(value)) continue;
+                seen.Add(value);
+                yield return new RowSource(names[i], value);
+            }
+
+            Type t = confTable.GetType();
+            BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            FieldInfo[] fields = new FieldInfo[0];
+            try { fields = t.GetFields(flags); } catch { }
+            for (int i = 0; i < fields.Length; i++)
+            {
+                FieldInfo f = fields[i];
+                if (f.Name.Contains("k__BackingField")) continue;
+                object value = null;
+                try { value = f.GetValue(confTable); } catch { continue; }
+                if (value == null || seen.Contains(value) || LooksLikePrimitive(value)) continue;
+                seen.Add(value);
+                yield return new RowSource("field:" + f.Name, value);
+            }
+
+            yield return new RowSource("self", confTable);
+        }
+
+        private static IEnumerable<object> EnumerateTableRows(object confTable)
+        {
+            foreach (RowSource source in GetTableRowSources(confTable))
+            {
+                int yielded = 0;
+                foreach (object row in EnumerateList(source.value))
+                {
+                    yielded++;
+                    yield return row;
+                }
+                if (yielded > 0) yield break;
+            }
         }
 
         private static string GetBestItemId(object item)
@@ -605,7 +679,7 @@ namespace MOD_b4qnSo
 
                 for (int i = 0; i < candidates.Count; i++)
                 {
-                    int added = DumpOneTable(sb, candidates[i].path, GetTableList(candidates[i].table), ref rows);
+                    int added = DumpOneTable(sb, candidates[i].path, candidates[i].table, ref rows);
                     if (added > 0)
                     {
                         tables++;
@@ -624,11 +698,11 @@ namespace MOD_b4qnSo
             return rows;
         }
 
-        private static int DumpOneTable(StringBuilder sb, string tableName, object allConf, ref int longRows)
+        private static int DumpOneTable(StringBuilder sb, string tableName, object confTable, ref int longRows)
         {
             int before = longRows;
             int row = 0;
-            foreach (object raw in EnumerateList(allConf))
+            foreach (object raw in EnumerateTableRows(confTable))
             {
                 object item = raw;
                 object key = GetMemberValue(raw, "Key");
@@ -645,6 +719,13 @@ namespace MOD_b4qnSo
             public string path;
             public object table;
             public TableRef(string p, object t) { path = p; table = t; }
+        }
+
+        private class RowSource
+        {
+            public string name;
+            public object value;
+            public RowSource(string n, object v) { name = n; value = v; }
         }
 
         // ========== Main ==========
@@ -679,9 +760,9 @@ namespace MOD_b4qnSo
             int count = 0;
             try
             {
-                var allConf = g.conf.roleCreateFeature.allConfList;
-                if (allConf == null) { Log("[LUCK] null"); return 0; }
-                foreach (object raw in EnumerateList(allConf))
+                object table = g.conf.roleCreateFeature;
+                if (table == null) { Log("[LUCK] null"); return 0; }
+                foreach (object raw in EnumerateTableRows(table))
                 {
                     dynamic item = raw;
                     string d = DisplayOrRaw(item.name);
@@ -708,9 +789,9 @@ namespace MOD_b4qnSo
             int count = 0;
             try
             {
-                var allConf = g.conf.itemProps.allConfList;
-                if (allConf == null) { Log("[ITEM] null"); return 0; }
-                foreach (object raw in EnumerateList(allConf))
+                object table = g.conf.itemProps;
+                if (table == null) { Log("[ITEM] null"); return 0; }
+                foreach (object raw in EnumerateTableRows(table))
                 {
                     dynamic item = raw;
                     string nameD = DisplayOrRaw(item.name);
@@ -757,7 +838,7 @@ namespace MOD_b4qnSo
         private int DumpProbe()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine("path,type,hasAllConfList,count");
+            sb.AppendLine("path,type,rowSource,sourceType,count,sampleRows");
             int rows = 0;
             try
             {
@@ -767,10 +848,19 @@ namespace MOD_b4qnSo
                     all, new HashSet<object>(), new HashSet<string>(), 0);
                 for (int i = 0; i < all.Count; i++)
                 {
-                    object list = GetTableList(all[i].table);
-                    sb.AppendLine(Esc(all[i].path) + "," + Esc(all[i].table.GetType().FullName) + ","
-                        + (GetMemberValue(all[i].table, "allConfList") != null) + "," + GetListCount(list));
-                    rows++;
+                    foreach (RowSource source in GetTableRowSources(all[i].table))
+                    {
+                        int sample = 0;
+                        foreach (object ignored in EnumerateList(source.value))
+                        {
+                            sample++;
+                            if (sample >= 3) break;
+                        }
+                        sb.AppendLine(Esc(all[i].path) + "," + Esc(all[i].table.GetType().FullName) + ","
+                            + Esc(source.name) + "," + Esc(source.value.GetType().FullName) + ","
+                            + GetListCount(source.value) + "," + sample);
+                        rows++;
+                    }
                 }
             }
             catch (Exception ex) { Log("[PROBE] " + ex.Message); }

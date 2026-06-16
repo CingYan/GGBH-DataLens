@@ -30,7 +30,7 @@
 | `dump_npc.csv` | NPC / 角色相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
 | `dump_method.csv` | 功法 / method 相關表 | table, row, id, field, value, value_display, isModExtend, sourceModId, sourceModName |
 | `dump_mods.csv` | MOD 來源對照 | sourceModId, sourceModName |
-| `dump_probe.csv` | 偵測到的配置表清單 | path, type, hasAllConfList, count |
+| `dump_probe.csv` | 偵測到的配置表與 row 容器清單 | path, type, rowSource, sourceType, count, sampleRows |
 
 ## 🔧 安裝方式
 
@@ -63,6 +63,12 @@
 - **編碼**：UTF-8 with BOM
 
 ## 📋 版本紀錄
+
+### v1.2.4 (2026-06-16)
+- Hotfix：修正 v1.2.3 已找到配置表 candidates，但每張表 rows 仍為 0 的問題
+- 表資料列不再只依賴 `allConfList` / `allConfDic`，改為自動探測 `dic`、`list`、`data`、`values`、`confList` 等常見 row 容器
+- `DumpLuck` / `DumpItems` 也改用共用 row-source 探測，避免新版或 MOD 表結構下 `allConfList` 為空
+- `dump_probe.csv` 改為輸出每張候選表的 rowSource、sourceType、count 與 sampleRows，方便定位實際資料掛載位置
 
 ### v1.2.3 (2026-06-16)
 - Hotfix：修正 v1.2.2 雖不閃退，但所有 dump 皆為 0 rows 的問題
