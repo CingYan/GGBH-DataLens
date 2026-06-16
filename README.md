@@ -64,6 +64,11 @@
 
 ## 📋 版本紀錄
 
+### v1.2.3 (2026-06-16)
+- Hotfix：修正 v1.2.2 雖不閃退，但所有 dump 皆為 0 rows 的問題
+- 列舉配置表時新增 `IEnumerable` / Dictionary-style 支援，避免只有 `Count` 但無法用 `Item[index]` 取值時輸出空表
+- `g.conf` 掃描只在 0～1 層讀取 properties，深層仍只走 fields，兼顧配置表發現率與穩定性
+
 ### v1.2.2 (2026-06-16)
 - Hotfix：修正 v1.2.1 仍可能在 `[DRAMA] scanning g.conf recursively...` 階段閃退的問題
 - 掃描時先以路徑 / 型別名稱命中關鍵字後，才嘗試判斷該物件是否為配置表，避免對所有 `g.conf` 物件呼叫 `Count` / `Item[index]`

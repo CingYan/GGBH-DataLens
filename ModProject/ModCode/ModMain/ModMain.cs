@@ -11,7 +11,7 @@ namespace MOD_b4qnSo
 {
     public class ModMain
     {
-        private const string VERSION = "datalens-v1.2.2";
+        private const string VERSION = "datalens-v1.2.3";
         private const int MAX_ROWS_PER_TABLE = 200000;
         private const int MAX_FAILS_AFTER_DATA = 25;
         private const int MAX_SCAN_DEPTH = 3;
@@ -353,6 +353,21 @@ namespace MOD_b4qnSo
 
         private static IEnumerable<object> EnumerateList(object list)
         {
+            IEnumerable enumerable = list as IEnumerable;
+            if (enumerable != null && !(list is string))
+            {
+                int yielded = 0;
+                foreach (object raw in enumerable)
+                {
+                    if (raw == null) continue;
+                    object value = GetMemberValue(raw, "Value");
+                    yield return value ?? raw;
+                    yielded++;
+                    if (yielded >= MAX_ROWS_PER_TABLE) yield break;
+                }
+                if (yielded > 0) yield break;
+            }
+
             int count = GetListCount(list);
             if (count >= 0)
             {
@@ -421,8 +436,18 @@ namespace MOD_b4qnSo
                 FindMatchingTables(value, path + "." + f.Name, keywords, result, seen, tableSeen, depth + 1);
             }
 
-            // IL2CPP property getters can execute native code and crash the game.
-            // Field traversal is less complete but much safer for a diagnostic dumper.
+            if (depth <= 1)
+            {
+                PropertyInfo[] props = t.GetProperties(flags);
+                for (int i = 0; i < props.Length; i++)
+                {
+                    PropertyInfo p = props[i];
+                    if (p.GetIndexParameters().Length > 0) continue;
+                    object value = null;
+                    try { value = p.GetValue(root, null); } catch { continue; }
+                    FindMatchingTables(value, path + "." + p.Name, keywords, result, seen, tableSeen, depth + 1);
+                }
+            }
         }
 
         private static object GetTableList(object confTable)
